@@ -1,12 +1,6 @@
-from collections import defaultdict
-from math import pi, cos, sin
-
 import cv2
 import numpy as np
-
-
-# from canny import canny_edge_detector
-
+import matplotlib.pyplot as plt
 
 def myID() -> np.int:
     """
@@ -16,8 +10,9 @@ def myID() -> np.int:
     return 207950577
 
 
-sobel_x = np.array([[1.0, 0.0, -1.0], [2.0, 0.0, -2.0], [1.0, 0.0, -1.0]]) / 8.0
-sobel_y = np.array([[1.0, 2.0, 1.0], [0.0, 0.0, 0.0], [-1.0, -2.0, -1.0]]) / 8.0
+sobel_x = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]])
+sobel_y = np.array([[1, 2, 1], [0, 0, 0], [-1, -2, -1]])
+laplacian_ker = np.array([[0, 1, 0], [1, -4, 1], [0, 1, 0]])
 
 
 # 1
@@ -29,19 +24,13 @@ def conv1D(inSignal: np.ndarray, kernel1: np.ndarray) -> np.ndarray:
     :param kernel1: 1-D array as a kernel
     :return: The convolved array
     """
-    # signal_rev = np.flipud(inSignal)
-    # signal_len = signal_rev.shape[0]
-    # kernel_len = kernel1.shape[0]
-    # l = kernel_len // 2
-    # signal_conv = np.zeros(signal_len)
-    #
-    # for j in range(l, signal_len - l):
-    #     sum = 0
-    #     for n in range(kernel_len):
-    #         sum = sum + kernel1[n] * signal_rev[j - l + n]
-    #     signal_conv[j] = sum
-    # return signal_conv
-    return conv2D(np.array([inSignal]), np.array([kernel1]))
+    k_len = len(kernel1)
+    inSignal = np.pad(inSignal, (k_len - 1, k_len - 1), 'constant')
+    sig_len = len(inSignal)
+    signal_conv = np.zeros(sig_len - k_len + 1)
+    for i in range(sig_len - k_len + 1):
+        signal_conv[i] = (inSignal[i:i + k_len] * kernel1).sum()
+    return signal_conv
 
 
 def conv2D(inImage: np.ndarray, kernel2: np.ndarray) -> np.ndarray:
@@ -51,20 +40,14 @@ def conv2D(inImage: np.ndarray, kernel2: np.ndarray) -> np.ndarray:
     :param kernel2: A kernel
     :return: The convolved image
     """
+    kernel2 = np.flip(kernel2)
     img_h, img_w = inImage.shape
     ker_h, ker_w = kernel2.shape
-    pad = (ker_w - 1) // 2  # "pad" is the borders of the input image
-    print(pad)
-    image = cv2.copyMakeBorder(inImage, pad, pad, pad, pad, cv2.BORDER_REPLICATE)
-    print(image)
+    image_padded = np.pad(inImage, (ker_h // 2, ker_w // 2), 'edge')
     output = np.zeros((img_h, img_w))
-    for y in range(pad, img_h + pad):
-        for x in range(pad, img_w + pad):
-            roi = image[y - pad:y + pad + 1, x - pad:x + pad + 1]
-            output[y - pad, x - pad] = (roi * kernel2).sum()
-    # output = rescale_intensity(output, in_range=(0, 255))
-    # output = (output * 255).astype("uint8")
-    # output = (output * 255)
+    for y in range(img_h):
+        for x in range(img_w):
+            output[y, x] = (image_padded[y:y + ker_h, x:x + ker_w] * kernel2).sum()
     return output
 
 
@@ -76,17 +59,17 @@ def convDerivative(inImage: np.ndarray) -> (np.ndarray, np.ndarray, np.ndarray, 
     :param inImage: Grayscale image
     :return: (directions, magnitude,x_der,y_der)
     """
-    Gx = np.array([[-1, 0, 1]])
+    Gx = np.array([[-1, 0, 1], [-1, 0, 1], [-1, 0, 1]])
     Gy = Gx.transpose()
 
     x_der = conv2D(inImage, Gx)
     y_der = conv2D(inImage, Gy)
 
     directions = np.rad2deg(np.arctan2(y_der, x_der))
-    directions[directions < 0] += 180
+    # directions[directions < 0] += 180
 
     magnitude = np.sqrt(np.square(x_der) + np.square(y_der))
-    magnitude = (magnitude / np.max(magnitude)) * 255
+    # magnitude = magnitude * 255.0 / magnitude.max()
 
     return directions, magnitude, x_der, y_der
 
@@ -100,7 +83,20 @@ def blurImage1(in_image: np.ndarray, kernel_size: np.ndarray) -> np.ndarray:
     :param kernel_size: Kernel size
     :return: The Blurred image
     """
-    return conv2D(in_image, kernel_size)
+    assert (kernel_size[0] == kernel_size[1])
+    assert (kernel_size[0] % 2 == 1)
+    sigma = 0.3 * ((kernel_size[0] - 1) * 0.5 - 1) + 0.8
+    return conv2D(in_image, create_gaussian(kernel_size[0], sigma))
+
+
+def create_gaussian(size, sigma):
+    mid = size // 2
+    kernel = np.zeros((size, size))
+    for i in range(size):
+        for j in range(size):
+            x, y = i - mid, j - mid
+            kernel[i, j] = np.exp(-(x ** 2 + y ** 2) / (2 * sigma ** 2)) / (2 * np.pi * sigma ** 2)
+    return kernel
 
 
 def blurImage2(in_image: np.ndarray, kernel_size: np.ndarray) -> np.ndarray:
@@ -110,7 +106,11 @@ def blurImage2(in_image: np.ndarray, kernel_size: np.ndarray) -> np.ndarray:
     :param kernel_size: Kernel size
     :return: The Blurred image
     """
-    return cv2.filter2D(in_image, -1, kernel_size, borderType=cv2.BORDER_REPLICATE)
+    assert (kernel_size[0] == kernel_size[1])
+    assert (kernel_size[0] % 2 == 1)
+    sigma = 0.3 * ((kernel_size[0] - 1) * 0.5 - 1) + 0.8
+    kernel = cv2.getGaussianKernel(kernel_size, sigma)
+    return cv2.filter2D(in_image, -1, kernel, borderType=cv2.BORDER_REPLICATE)
 
 
 # bonus
@@ -125,18 +125,19 @@ def edgeDetectionSobel(img: np.ndarray, thresh: float = 0.7) -> (np.ndarray, np.
     :param thresh: The minimum threshold for the edge response
     :return: opencv solution, my implementation
     """
+    assert (1 >= thresh >= 0)
     x_der = conv2D(img, sobel_x)
     y_der = conv2D(img, sobel_y)
     magnitude = np.sqrt(np.square(x_der) + np.square(y_der))
-    sob_result = (magnitude / np.max(magnitude)) * 255
-    sob_result[sob_result < thresh * 255] = 0
+    magnitude[magnitude < thresh * 255] = 0
+    magnitude[magnitude >= thresh * 255] = 1
     # using cv2:
-    grad_x = cv2.Sobel(img, cv2.CV_64F, 1, 0, ksize=3)
-    grad_y = cv2.Sobel(img, cv2.CV_64F, 0, 1, ksize=3)
-    abs_grad_x = cv2.convertScaleAbs(grad_x)
-    abs_grad_y = cv2.convertScaleAbs(grad_y)
-    combine = cv2.addWeighted(abs_grad_x, 0.5, abs_grad_y, 0.5, 0)
-    return combine, sob_result
+    grad_x = cv2.Sobel(img, cv2.CV_64F, 1, 0)
+    grad_y = cv2.Sobel(img, cv2.CV_64F, 0, 1)
+    combine = cv2.magnitude(grad_x, grad_y)
+    combine[combine < thresh * 255] = 0
+    combine[combine >= thresh * 255] = 1
+    return combine, magnitude
 
 
 # one of the two
@@ -147,38 +148,30 @@ def edgeDetectionZeroCrossingSimple(img: np.ndarray) -> np.ndarray:
     :param img: Input image
     :return: Edge matrix
     """
-    img = cv2.GaussianBlur(img, (0, 0), 1) if 0. < 1 else img
-    img = cv2.Laplacian(img, cv2.CV_64F)
-    rows, cols = img.shape
-    # min/max of 3x3-neighbourhoods
-    min_map = np.minimum.reduce(list(img[r:rows - 2 + r, c:cols - 2 + c]
-                                     for r in range(3) for c in range(3)))
-    max_map = np.maximum.reduce(list(img[r:rows - 2 + r, c:cols - 2 + c]
-                                     for r in range(3) for c in range(3)))
-    # bool matrix for image value positiv (w/out border pixels)
-    pos_img = 0 < img[1:rows - 1, 1:cols - 1]
-    # bool matrix for min < 0 and 0 < image pixel
-    neg_min = min_map < 0
-    neg_min[1 - pos_img] = 0
-    # bool matrix for 0 < max and image pixel < 0
-    pos_max = 0 < max_map
-    pos_max[pos_img] = 0
-    # sign change at pixel?
-    zero_cross = neg_min + pos_max
-    # values: max - min, scaled to 0--255; set to 0 for no sign change
-    value_scale = 255. / max(1., img.max() - img.min())
-    values = value_scale * (max_map - min_map)
-    values[1 - zero_cross] = 0.
-    log_img = values.astype(np.uint8)
-    return log_img
+    img = conv2D(img, laplacian_ker)
+    zero_crossing = np.zeros(img.shape)
+    for i in range(img.shape[0] - (laplacian_ker.shape[0] - 1)):
+        for j in range(img.shape[1] - (laplacian_ker.shape[1] - 1)):
+            if img[i][j] == 0:
+                if (img[i][j - 1] < 0 and img[i][j + 1] > 0) or \
+                        (img[i][j - 1] < 0 and img[i][j + 1] < 0) or \
+                        (img[i - 1][j] < 0 and img[i + 1][j] > 0) or \
+                        (img[i - 1][j] > 0 and img[i + 1][j] < 0):
+                    zero_crossing[i][j] = 255
+            if img[i][j] < 0:
+                if (img[i][j - 1] > 0) or (img[i][j + 1] > 0) or (img[i - 1][j] > 0) or (img[i + 1][j] > 0):
+                    zero_crossing[i][j] = 255
+    return zero_crossing
 
 
-# def edgeDetectionZeroCrossingLOG(img: np.ndarray) -> np.ndarray:
-#     """
-#     Detecting edges using the "ZeroCrossingLOG" method
-#     :param img: Input image
-#     :return: :return: Edge matrix
-#     """
+def edgeDetectionZeroCrossingLOG(img: np.ndarray) -> np.ndarray:
+    """
+    Detecting edges using the "ZeroCrossingLOG" method
+    :param img: Input image
+    :return: :return: Edge matrix
+    """
+    img = cv2.GaussianBlur(img, (5, 5), 0)
+    return edgeDetectionZeroCrossingSimple(img)
 
 
 def edgeDetectionCanny(img: np.ndarray, thrs_1: float, thrs_2: float) -> (np.ndarray, np.ndarray):
@@ -189,59 +182,104 @@ def edgeDetectionCanny(img: np.ndarray, thrs_1: float, thrs_2: float) -> (np.nda
     :param thrs_2: T2
     :return: opencv solution, my implementation
     """
+    assert (1 >= thrs_1 >= 0)
+    assert (1 >= thrs_2 >= 0)
     img = cv2.GaussianBlur(img, (5, 5), 0)
-    directions, magnitude = convDerivative(img)[:2]
+    grad_x = conv2D(img, sobel_x)
+    grad_y = conv2D(img, sobel_y)
+    magnitude = np.hypot(grad_x, grad_y)
+    directions = np.arctan2(grad_y, grad_x)
     result = non_maximum_suppression(magnitude, directions)
-    result = double_threshold_hysteresis(result, thrs_1, thrs_2)
+    result = double_threshold_hysteresis(result, thrs_1 * 255, thrs_2 * 255)
 
     # using cv2:
-    edges_cv2 = cv2.Canny(img, thrs_1, thrs_2)
+    edges_cv2 = cv2.Canny(cv2.GaussianBlur(img, (5, 5), 0), thrs_1 * 255, thrs_2 * 255)
 
     return edges_cv2, result
 
 
-def non_maximum_suppression(image, angles):
-    suppressed = np.zeros(image.shape)
-    for i in range(1, image.shape[0] - 1):
-        for j in range(1, image.shape[1] - 1):
-            if (0 <= angles[i, j] < 22.5) or (157.5 <= angles[i, j] <= 180):
-                value_to_compare = max(image[i, j - 1], image[i, j + 1])
-            elif 22.5 <= angles[i, j] < 67.5:
-                value_to_compare = max(image[i - 1, j - 1], image[i + 1, j + 1])
-            elif 67.5 <= angles[i, j] < 112.5:
-                value_to_compare = max(image[i - 1, j], image[i + 1, j])
-            else:
-                value_to_compare = max(image[i + 1, j - 1], image[i - 1, j + 1])
-
-            if image[i, j] >= value_to_compare:
-                suppressed[i, j] = image[i, j]
-    # suppressed = np.multiply(suppressed, 255.0 / suppressed.max())
-    return suppressed
+def round_angle(angle):
+    angle = np.rad2deg(angle) % 180
+    if angle < 22.5 or 157.5 <= angle:
+        angle = 0
+    elif 22.5 <= angle < 67.5:
+        angle = 45
+    elif 67.5 <= angle < 112.5:
+        angle = 90
+    elif 112.5 <= angle < 157.5:
+        angle = 135
+    return angle
 
 
-def double_threshold_hysteresis(image, low, high):
-    out = np.zeros(image.shape, dtype=np.uint8)
-    strong_i, strong_j = np.where(image >= high)
-    zeros_i, zeros_j = np.where(image < low)
+def non_maximum_suppression(magnitude, Theta):
+    ans = np.zeros(magnitude.shape)
+    for i in range(1, magnitude.shape[0] - 1):
+        for j in range(1, magnitude.shape[1] - 1):
+            angle = round_angle(Theta[i, j])
+            if angle == 0:
+                if (magnitude[i, j] > magnitude[i, j - 1]) and (magnitude[i, j] > magnitude[i, j + 1]):
+                    ans[i, j] = magnitude[i, j]
+            elif angle == 90:
+                if (magnitude[i, j] > magnitude[i - 1, j]) and (magnitude[i, j] > magnitude[i + 1, j]):
+                    ans[i, j] = magnitude[i, j]
+            elif angle == 135:
+                if (magnitude[i, j] > magnitude[i - 1, j - 1]) and (magnitude[i, j] > magnitude[i + 1, j + 1]):
+                    ans[i, j] = magnitude[i, j]
+            elif angle == 45:
+                if (magnitude[i, j] > magnitude[i - 1, j + 1]) and (magnitude[i, j] > magnitude[i + 1, j - 1]):
+                    ans[i, j] = magnitude[i, j]
+    return ans
 
-    # weak edges
-    weak_i, weak_j = np.where((image <= high) & (image >= low))
 
-    # Set same intensity value for all edge pixels
-    out[strong_i, strong_j] = 255
-    out[zeros_i, zeros_j] = 0
-    out[weak_i, weak_j] = 75
-    M, N = out.shape
-    for i in range(1, M - 1):
-        for j in range(1, N - 1):
-            if out[i, j] == 75:
-                if 255 in [out[i + 1, j - 1], out[i + 1, j], out[i + 1, j + 1], out[i, j - 1], out[i, j + 1],
-                           out[i - 1, j - 1], out[i - 1, j], out[i - 1, j + 1]]:
-                    out[i, j] = 255
-                else:
-                    out[i, j] = 0
-    return out
+def double_threshold_hysteresis(img, low, high):
+    img_h, img_w = img.shape
+    result = np.zeros((img_h, img_w))
+    result[img >= high] = 255
+    weak_x, weak_y = np.where((img <= high) & (img >= low))
+    for x, y in zip(weak_x, weak_y):
+        if 255 in [result[x - 1, y - 1], result[x - 1, y], result[x - 1, y + 1],
+                   result[x, y - 1], result[x, y + 1],
+                   result[x + 1, y - 1], result[x + 1, y], result[x + 1, y + 1]]:  # All his neighbors
+            result[x, y] = 255
+        else:
+            result[x, y] = 0
+    result[img < low] = 0
+    return result
 
+
+# def houghCircle(img: np.ndarray, min_radius: float, max_radius: float) -> list:
+#     """
+#     Find Circles in an image using a Hough Transform algorithm extension
+#     :param img: Input image
+#     :param min_radius: Minimum circle radius
+#     :param max_radius: Maximum circle radius
+#     :return: A list containing the detected circles,
+#     [(x,y,radius),(x,y,radius),...]
+#     """
+#     img_h, img_w = img.shape
+#     img = cv2.GaussianBlur(img, (5, 5), 0)
+#     canny_edges = cv2.Canny(img, 100, 200)
+#     plt.imshow(canny_edges)
+#     plt.show()
+#     x_edges, y_edges = np.where(canny_edges > 200)
+#     accumulator_tuple = np.array([[i, j, k] for i in range(img_h - min_radius + 1) for j in range(img_w - min_radius + 1) for k in range(int(max_radius - min_radius + 1))])
+#     accumulator_array = np.zeros(len(accumulator_tuple))
+#     print(accumulator_tuple)
+#     print(accumulator_array)
+#     for x, y in zip(x_edges, y_edges):
+#         i = 0
+#         for x0, y0, r0 in accumulator_tuple:
+#             r = round(math.sqrt((x - x0) ** 2 + (y - y0) ** 2))
+#             if min_radius <= r <= max_radius:
+#                 accumulator_array[i] += 1
+#             i = i+1
+#         print(accumulator_array[accumulator_array > 40])
+#     print(accumulator_array[accumulator_array > 40])
+#     circles_index = np.where(accumulator_array[accumulator_array > 40])
+#     circles = []
+#     for i in circles_index:
+#         circles.append(accumulator_tuple[i])
+#     return circles
 
 def houghCircle(img: np.ndarray, min_radius: float, max_radius: float) -> list:
     """
@@ -252,25 +290,29 @@ def houghCircle(img: np.ndarray, min_radius: float, max_radius: float) -> list:
     :return: A list containing the detected circles,
     [(x,y,radius),(x,y,radius),...]
     """
-    bimg = cv2.bilateralFilter(img, 5, 175, 175)
-
-    cann = cv2.Canny(bimg, 100, 200)
-
-    pixel = np.argwhere(cann == 255)
-
-    accum = [[[0 for r in range(int(min_radius), int(max_radius))] for h in range(0, 30)] for k in range(0, 30)]
-    print(accum)
-    for r in range(int(min_radius), int(max_radius)):
-        for h in range(0, 30):
-            for k in range(0, 30):
-                for p in pixel:
-                    # print r,h,k,p
-                    xpart = (h - p[0]) ** 2
-                    ypart = (k - p[1]) ** 2
-                    rhs = xpart + ypart
-                    lhs = r * r
-                    if (lhs == rhs):
-                        accum[k][h][r - int(min_radius)] += 1
-
-    print(accum)
-    return accum
+    img_h, img_w = img.shape
+    img = cv2.GaussianBlur(img, (5, 5), 0)
+    img = cv2.Canny(img, 50, 100)
+    x_y_edges = np.argwhere(img > 0)
+    A = np.zeros((max_radius, img_h + 2 * max_radius, img_w + 2 * max_radius))
+    B = np.zeros((max_radius, img_h + 2 * max_radius, img_w + 2 * max_radius))
+    theta = np.arange(0, 360) * np.pi / 180
+    for r in range(round(min_radius), round(max_radius)):
+        # Creating a Circle Blueprint
+        bprint = np.zeros((2 * (r+1), 2 * (r+1)))
+        (x_0, y_0) = (r+1, r+1)  # Finding out the center of the blueprint
+        for angle in theta:
+            x = int(np.round(r * np.cos(angle)))
+            y = int(np.round(r * np.sin(angle)))
+            bprint[x_0 + x, y_0 + y] = 1
+        constant = np.argwhere(bprint).shape[0]
+        for x, y in x_y_edges:  # For each edge coordinates
+            A[r, x - x_0 + max_radius:x + x_0 + max_radius, y - y_0 + max_radius:y + y_0 + max_radius] += bprint
+        A[r][A[r] < 7 * constant / r] = 0  # threshold
+    region = 15  # Size to detect peaks
+    for r, x, y in np.argwhere(A):  # Extracting the circle information
+        temp = A[r - region:r + region, x - region:x + region, y - region:y + region]
+        p, a, b = np.unravel_index(np.argmax(temp), temp.shape)
+        B[r + (p - region), x + (a - region), y + (b - region)] = 1
+    circleCoordinates = np.argwhere(B[:, max_radius:-max_radius, max_radius:-max_radius])
+    return circleCoordinates
