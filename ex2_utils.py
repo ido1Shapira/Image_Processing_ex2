@@ -1,6 +1,5 @@
 import cv2
 import numpy as np
-import matplotlib.pyplot as plt
 
 def myID() -> np.int:
     """
@@ -59,7 +58,7 @@ def convDerivative(inImage: np.ndarray) -> (np.ndarray, np.ndarray, np.ndarray, 
     :param inImage: Grayscale image
     :return: (directions, magnitude,x_der,y_der)
     """
-    Gx = np.array([[-1, 0, 1], [-1, 0, 1], [-1, 0, 1]])
+    Gx = np.array([[0, 0, 0], [-1, 0, 1], [0, 0, 0]])
     Gy = Gx.transpose()
 
     x_der = conv2D(inImage, Gx)
@@ -76,17 +75,16 @@ def convDerivative(inImage: np.ndarray) -> (np.ndarray, np.ndarray, np.ndarray, 
 
 # bonus
 
-def blurImage1(in_image: np.ndarray, kernel_size: np.ndarray) -> np.ndarray:
+def blurImage1(in_image: np.ndarray, kernel_size: int) -> np.ndarray:
     """
     Blur an image using a Gaussian kernel
     :param in_image: Input image
     :param kernel_size: Kernel size
     :return: The Blurred image
     """
-    assert (kernel_size[0] == kernel_size[1])
-    assert (kernel_size[0] % 2 == 1)
-    sigma = 0.3 * ((kernel_size[0] - 1) * 0.5 - 1) + 0.8
-    return conv2D(in_image, create_gaussian(kernel_size[0], sigma))
+    assert (kernel_size % 2 == 1)
+    sigma = 0.3 * ((kernel_size - 1) * 0.5 - 1) + 0.8
+    return conv2D(in_image, create_gaussian(kernel_size, sigma))
 
 
 def create_gaussian(size, sigma):
@@ -99,22 +97,19 @@ def create_gaussian(size, sigma):
     return kernel
 
 
-def blurImage2(in_image: np.ndarray, kernel_size: np.ndarray) -> np.ndarray:
+def blurImage2(in_image: np.ndarray, kernel_size: int) -> np.ndarray:
     """
     Blur an image using a Gaussian kernel using OpenCV built-in functions
     :param in_image: Input image
     :param kernel_size: Kernel size
     :return: The Blurred image
     """
-    assert (kernel_size[0] == kernel_size[1])
-    assert (kernel_size[0] % 2 == 1)
-    sigma = 0.3 * ((kernel_size[0] - 1) * 0.5 - 1) + 0.8
+    assert (kernel_size % 2 == 1)
+    sigma = int(round(0.3 * ((kernel_size - 1) * 0.5 - 1) + 0.8))
     kernel = cv2.getGaussianKernel(kernel_size, sigma)
     return cv2.filter2D(in_image, -1, kernel, borderType=cv2.BORDER_REPLICATE)
 
-
 # bonus
-
 
 # 3
 
@@ -131,6 +126,7 @@ def edgeDetectionSobel(img: np.ndarray, thresh: float = 0.7) -> (np.ndarray, np.
     magnitude = np.sqrt(np.square(x_der) + np.square(y_der))
     magnitude[magnitude < thresh * 255] = 0
     magnitude[magnitude >= thresh * 255] = 1
+
     # using cv2:
     grad_x = cv2.Sobel(img, cv2.CV_64F, 1, 0)
     grad_y = cv2.Sobel(img, cv2.CV_64F, 0, 1)
@@ -156,7 +152,7 @@ def edgeDetectionZeroCrossingSimple(img: np.ndarray) -> np.ndarray:
                 if (img[i][j - 1] < 0 and img[i][j + 1] > 0) or \
                         (img[i][j - 1] < 0 and img[i][j + 1] < 0) or \
                         (img[i - 1][j] < 0 and img[i + 1][j] > 0) or \
-                        (img[i - 1][j] > 0 and img[i + 1][j] < 0):
+                        (img[i - 1][j] > 0 and img[i + 1][j] < 0):  # All his neighbors
                     zero_crossing[i][j] = 255
             if img[i][j] < 0:
                 if (img[i][j - 1] > 0) or (img[i][j + 1] > 0) or (img[i - 1][j] > 0) or (img[i + 1][j] > 0):
@@ -187,8 +183,8 @@ def edgeDetectionCanny(img: np.ndarray, thrs_1: float, thrs_2: float) -> (np.nda
     img = cv2.GaussianBlur(img, (5, 5), 0)
     grad_x = conv2D(img, sobel_x)
     grad_y = conv2D(img, sobel_y)
-    magnitude = np.hypot(grad_x, grad_y)
-    directions = np.arctan2(grad_y, grad_x)
+    magnitude = np.sqrt(np.square(grad_x) + np.square(grad_y))
+    directions = round_angle(np.rad2deg(np.arctan2(grad_y, grad_x)) % 180)
     result = non_maximum_suppression(magnitude, directions)
     result = double_threshold_hysteresis(result, thrs_1 * 255, thrs_2 * 255)
 
@@ -198,88 +194,46 @@ def edgeDetectionCanny(img: np.ndarray, thrs_1: float, thrs_2: float) -> (np.nda
     return edges_cv2, result
 
 
-def round_angle(angle):
-    angle = np.rad2deg(angle) % 180
-    if angle < 22.5 or 157.5 <= angle:
-        angle = 0
-    elif 22.5 <= angle < 67.5:
-        angle = 45
-    elif 67.5 <= angle < 112.5:
-        angle = 90
-    elif 112.5 <= angle < 157.5:
-        angle = 135
+def round_angle(angle: np.ndarray):
+    angle[(angle < 22.5) | (157.5 <= angle)] = 0
+    angle[(22.5 <= angle) & (angle < 67.5)] = 45
+    angle[(67.5 <= angle) & (angle < 112.5)] = 90
+    angle[(112.5 <= angle) & (angle < 157.5)] = 135
     return angle
-
 
 def non_maximum_suppression(magnitude, Theta):
     ans = np.zeros(magnitude.shape)
     for i in range(1, magnitude.shape[0] - 1):
         for j in range(1, magnitude.shape[1] - 1):
-            angle = round_angle(Theta[i, j])
-            if angle == 0:
+            if Theta[i, j] == 0:
                 if (magnitude[i, j] > magnitude[i, j - 1]) and (magnitude[i, j] > magnitude[i, j + 1]):
                     ans[i, j] = magnitude[i, j]
-            elif angle == 90:
+            elif Theta[i, j] == 45:
+                if (magnitude[i, j] > magnitude[i - 1, j + 1]) and (magnitude[i, j] > magnitude[i + 1, j - 1]):
+                    ans[i, j] = magnitude[i, j]
+            elif Theta[i, j] == 90:
                 if (magnitude[i, j] > magnitude[i - 1, j]) and (magnitude[i, j] > magnitude[i + 1, j]):
                     ans[i, j] = magnitude[i, j]
-            elif angle == 135:
+            elif Theta[i, j] == 135:
                 if (magnitude[i, j] > magnitude[i - 1, j - 1]) and (magnitude[i, j] > magnitude[i + 1, j + 1]):
-                    ans[i, j] = magnitude[i, j]
-            elif angle == 45:
-                if (magnitude[i, j] > magnitude[i - 1, j + 1]) and (magnitude[i, j] > magnitude[i + 1, j - 1]):
                     ans[i, j] = magnitude[i, j]
     return ans
 
+def All_his_neighbors(img, x, y):
+    return [img[x - 1, y - 1], img[x - 1, y],
+            img[x - 1, y + 1], img[x, y - 1],
+            img[x, y + 1], img[x + 1, y - 1],
+            img[x + 1, y], img[x + 1, y + 1]]
 
 def double_threshold_hysteresis(img, low, high):
     img_h, img_w = img.shape
     result = np.zeros((img_h, img_w))
     result[img >= high] = 255
-    weak_x, weak_y = np.where((img <= high) & (img >= low))
-    for x, y in zip(weak_x, weak_y):
-        if 255 in [result[x - 1, y - 1], result[x - 1, y], result[x - 1, y + 1],
-                   result[x, y - 1], result[x, y + 1],
-                   result[x + 1, y - 1], result[x + 1, y], result[x + 1, y + 1]]:  # All his neighbors
-            result[x, y] = 255
-        else:
-            result[x, y] = 0
+    weak_x_y = np.argwhere((img <= high) & (img >= low))
+    for x, y in weak_x_y:
+        result[x, y] = 255 if 255 in All_his_neighbors(result, x, y) else 0
     result[img < low] = 0
     return result
-
-
-# def houghCircle(img: np.ndarray, min_radius: float, max_radius: float) -> list:
-#     """
-#     Find Circles in an image using a Hough Transform algorithm extension
-#     :param img: Input image
-#     :param min_radius: Minimum circle radius
-#     :param max_radius: Maximum circle radius
-#     :return: A list containing the detected circles,
-#     [(x,y,radius),(x,y,radius),...]
-#     """
-#     img_h, img_w = img.shape
-#     img = cv2.GaussianBlur(img, (5, 5), 0)
-#     canny_edges = cv2.Canny(img, 100, 200)
-#     plt.imshow(canny_edges)
-#     plt.show()
-#     x_edges, y_edges = np.where(canny_edges > 200)
-#     accumulator_tuple = np.array([[i, j, k] for i in range(img_h - min_radius + 1) for j in range(img_w - min_radius + 1) for k in range(int(max_radius - min_radius + 1))])
-#     accumulator_array = np.zeros(len(accumulator_tuple))
-#     print(accumulator_tuple)
-#     print(accumulator_array)
-#     for x, y in zip(x_edges, y_edges):
-#         i = 0
-#         for x0, y0, r0 in accumulator_tuple:
-#             r = round(math.sqrt((x - x0) ** 2 + (y - y0) ** 2))
-#             if min_radius <= r <= max_radius:
-#                 accumulator_array[i] += 1
-#             i = i+1
-#         print(accumulator_array[accumulator_array > 40])
-#     print(accumulator_array[accumulator_array > 40])
-#     circles_index = np.where(accumulator_array[accumulator_array > 40])
-#     circles = []
-#     for i in circles_index:
-#         circles.append(accumulator_tuple[i])
-#     return circles
 
 def houghCircle(img: np.ndarray, min_radius: float, max_radius: float) -> list:
     """
@@ -295,24 +249,28 @@ def houghCircle(img: np.ndarray, min_radius: float, max_radius: float) -> list:
     img = cv2.Canny(img, 50, 100)
     x_y_edges = np.argwhere(img > 0)
     A = np.zeros((max_radius, img_h + 2 * max_radius, img_w + 2 * max_radius))
-    B = np.zeros((max_radius, img_h + 2 * max_radius, img_w + 2 * max_radius))
     theta = np.arange(0, 360) * np.pi / 180
     for r in range(round(min_radius), round(max_radius)):
         # Creating a Circle Blueprint
         bprint = np.zeros((2 * (r+1), 2 * (r+1)))
-        (x_0, y_0) = (r+1, r+1)  # Finding out the center of the blueprint
+        (x_0, y_0) = (r+1, r+1)  # the center of the blueprint
         for angle in theta:
             x = int(np.round(r * np.cos(angle)))
             y = int(np.round(r * np.sin(angle)))
             bprint[x_0 + x, y_0 + y] = 1
         constant = np.argwhere(bprint).shape[0]
+
         for x, y in x_y_edges:  # For each edge coordinates
             A[r, x - x_0 + max_radius:x + x_0 + max_radius, y - y_0 + max_radius:y + y_0 + max_radius] += bprint
-        A[r][A[r] < 7 * constant / r] = 0  # threshold
+        threshold = 7
+        A[r][A[r] < threshold * constant / r] = 0  # threshold
+
+    # Extracting the circle information
+    B = np.zeros((max_radius, img_h + 2 * max_radius, img_w + 2 * max_radius))
     region = 15  # Size to detect peaks
-    for r, x, y in np.argwhere(A):  # Extracting the circle information
-        temp = A[r - region:r + region, x - region:x + region, y - region:y + region]
-        p, a, b = np.unravel_index(np.argmax(temp), temp.shape)
+    for r, x, y in np.argwhere(A):
+        environment = A[r - region:r + region, x - region:x + region, y - region:y + region]
+        p, a, b = np.unravel_index(np.argmax(environment), environment.shape)
         B[r + (p - region), x + (a - region), y + (b - region)] = 1
     circleCoordinates = np.argwhere(B[:, max_radius:-max_radius, max_radius:-max_radius])
     return circleCoordinates
